@@ -111,12 +111,42 @@
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // --- Configuration ---
-        const firebaseConfig = JSON.parse(__firebase_config);
+        // --- Configuration (GitHub Deployment Setup) ---
+        // 尾熊注意：當你把檔案放到 GitHub 時，__firebase_config 會不存在。
+        // 請去 Firebase Console 申請一個專案，然後把設定貼在下方的 `else` 區塊中！
+        
+        let firebaseConfig;
+        let isInternalEnv = false;
+
+        if (typeof __firebase_config !== 'undefined') {
+            // 內部預覽環境 (不要動這裡)
+            firebaseConfig = JSON.parse(__firebase_config);
+            isInternalEnv = true;
+        } else {
+            // ⚠️ GITHUB 上架區：請將下方的 "你的_API_KEY" 等等替換成你真實的 Firebase 設定
+            firebaseConfig = {
+                apiKey: "你的_API_KEY",
+                authDomain: "你的_PROJECT_ID.firebaseapp.com",
+                projectId: "你的_PROJECT_ID",
+                storageBucket: "你的_PROJECT_ID.firebasestorage.app",
+                messagingSenderId: "你的_SENDER_ID",
+                appId: "你的_APP_ID"
+            };
+        }
+
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        // --- Helper to get Collection Path ---
+        // 內部環境需要特殊路徑，但你自己的 GitHub 只需要直接存取 'messages'
+        function getMessagesCollection() {
+            if (isInternalEnv && typeof __app_id !== 'undefined') {
+                return collection(db, 'artifacts', __app_id, 'public', 'data', 'messages');
+            } else {
+                return collection(db, 'messages');
+            }
+        }
 
         // --- State ---
         let currentUser = null; // Firebase Auth User
@@ -174,7 +204,8 @@
                 }
             } catch (error) {
                 console.error("Auth Error:", error);
-                alert("登入系統失敗，請重整頁面。");
+                // Don't alert immediately on GitHub if config is wrong, just log
+                if (isInternalEnv) alert("登入系統失敗，請重整頁面。");
             }
         }
 
@@ -218,10 +249,8 @@
         function startMessageListener() {
             if (!currentUser) return;
             
-            // Rule: No complex queries. Fetch collection and filter in memory.
-            // Using a single collection 'messages' for simplicity in this artifact environment.
-            // Path: /artifacts/{appId}/public/data/messages
-            const messagesRef = collection(db, 'artifacts', appId, 'public', 'data', 'messages');
+            // Use the helper to get the correct path based on environment
+            const messagesRef = getMessagesCollection();
             
             // We listen to all messages, but filter client-side for the room code.
             // This is necessary because we can't create dynamic collections or complex indexes easily here.
@@ -241,6 +270,9 @@
                 renderMessages(roomMessages);
             }, (error) => {
                 console.error("Firestore Error:", error);
+                if (!isInternalEnv) {
+                    alert("讀取訊息失敗！請檢查 Firebase Console 的 Firestore Rules 是否允許讀寫。\n(提示: allow read, write: if true;)");
+                }
             });
         }
 
@@ -326,8 +358,9 @@
             input.value = ''; // Clear immediately for UX
 
             try {
-                // Path: /artifacts/{appId}/public/data/messages
-                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), {
+                // Use helper to get correct path
+                const messagesRef = getMessagesCollection();
+                await addDoc(messagesRef, {
                     text: text,
                     senderName: userProfile.name,
                     uid: currentUser.uid,
